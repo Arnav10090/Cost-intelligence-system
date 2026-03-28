@@ -1,0 +1,4 @@
+# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\agents\interfaces.py
+# hypothesis_version: 6.151.9
+
+[0.0, '0.00', 'action_details', 'action_state', 'action_type', 'actions_taken', 'agent', 'anomalies_detected', 'anomaly_id', 'anomaly_type', 'approval_required', 'confidence', 'cost_impact_inr', 'cost_saved', 'elapsed_ms', 'entity_id', 'entity_table', 'error', 'errors', 'model_used', 'reasoning_chain', 'recommended_action', 'root_cause', 'severity', 'success', 'task_id', 'task_type', 'timestamp', 'total_cost_saved_inr', 'total_elapsed_ms', 'urgency']

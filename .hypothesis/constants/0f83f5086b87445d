@@ -1,0 +1,4 @@
+# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\routers\approvals.py
+# hypothesis_version: 6.151.9
+
+[404, 500, '/', '/api/approvals', '/stats', '/{action_id}', '/{action_id}/approve', '/{action_id}/reject', 'Action not found', 'action', 'approvals', 'approved', 'audit_note', 'count', 'message', 'overridden', 'pending_approval', 'rejected', 'rolled_back', 'status', 'success', 'total']

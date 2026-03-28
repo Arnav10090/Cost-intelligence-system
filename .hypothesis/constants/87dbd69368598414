@@ -1,0 +1,4 @@
+# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\core\config.py
+# hypothesis_version: 6.151.9
+
+[0.15, 0.7, 0.8, 5.0, 50000.0, 1025, 4096, 5432, 6379, 8000, '../.env', 'HIGH', 'INFO', 'ci_pass', 'ci_user', 'cost_intelligence', 'deepseek-r1:7b', 'development', 'llama3.2:3b', 'localhost', 'qwen2.5:7b']

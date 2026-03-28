@@ -1,0 +1,4 @@
+# file: C:\Users\Asus\AppData\Roaming\Python\Python312\site-packages\hiredis\__init__.py
+# hypothesis_version: 6.151.9
+
+['HiredisError', 'ProtocolError', 'PushNotification', 'Reader', 'ReplyError', '__version__', 'pack_command']
