@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Cost Intelligence System
+# 🧠 Cost Intelligence System 
 
 ### Self-Healing Enterprise Cost Intelligence & Autonomous Action Platform
 
@@ -664,7 +664,7 @@ For questions, issues, or feature requests:
 
 <div align="center">
 
-**Built with ❤️ for ET Gen AI Hackathon 2026**
+**Built with ❤️ for ET Gen AI Hackathon 2026 by Team AI Apex**
 
 ⭐ Star this repo if you find it helpful!
 
