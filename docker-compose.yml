@@ -63,6 +63,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: dev
     container_name: ci_frontend
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
@@ -73,10 +74,12 @@ services:
       - backend
     volumes:
       - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+      - frontend_node_modules:/app/node_modules
+      - frontend_next:/app/.next
     command: npm run dev
 
 volumes:
   postgres_data:
   ollama_data:
+  frontend_node_modules:
+  frontend_next:

@@ -441,7 +441,7 @@ export function isWebSocketSupported(): boolean {
  * Get WebSocket URL for the dashboard endpoint.
  * Automatically determines the correct URL based on the environment.
  * 
- * @returns WebSocket URL (e.g., 'ws://localhost:8000/ws/dashboard')
+ * @returns WebSocket URL (e.g., 'ws://localhost:3000/ws/dashboard')
  */
 export function getWebSocketUrl(): string {
   // In browser environment
@@ -449,15 +449,11 @@ export function getWebSocketUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     
-    // If running on localhost, connect directly to backend
-    if (host.includes('localhost') || host.includes('127.0.0.1')) {
-      return `${protocol}//localhost:8000/ws/dashboard`;
-    }
-    
-    // In production, use same host (assumes backend is proxied)
+    // Use the Next.js proxy - connect to the same host as the frontend
+    // Next.js will proxy /ws/* to the backend via next.config.ts rewrites
     return `${protocol}//${host}/ws/dashboard`;
   }
   
   // Server-side rendering fallback
-  return 'ws://localhost:8000/ws/dashboard';
+  return 'ws://localhost:3000/ws/dashboard';
 }

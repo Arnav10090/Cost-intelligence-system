@@ -60,7 +60,7 @@ export default function Dashboard() {
             display: "flex", flexDirection: "column", gap: 2,
           }}>
             <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>ET Gen AI Hackathon 2026</span>
-            <span>Problem Statement #3 — Prize Pool: ₹10,00,000</span>
+            <span>Problem Statement #3</span>
           </div>
         </div>
       </div>
