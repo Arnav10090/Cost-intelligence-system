@@ -73,7 +73,7 @@ async def auto_release_holds_job() -> None:
     """
     try:
         from db.database import get_pool
-        from services.action_handlers.payment_handler import auto_release_stale_holds
+        from action_handlers.payment_handler import auto_release_stale_holds
         async with get_pool().acquire() as conn:
             count = await auto_release_stale_holds(conn)
         if count:

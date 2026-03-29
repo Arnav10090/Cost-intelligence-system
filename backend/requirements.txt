@@ -1,7 +1,8 @@
 # ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.115.5
-uvicorn==0.32.1
+uvicorn[standard]==0.32.1        # includes websockets support
 python-multipart==0.0.12        # form data support
+websockets==14.1                 # WebSocket support for real-time updates
 
 # ── Config & validation ───────────────────────────────────────────────────────
 pydantic==2.10.3

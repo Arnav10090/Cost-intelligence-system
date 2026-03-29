@@ -81,14 +81,27 @@ async def _ensure_model_loaded(model: ModelName) -> None:
 
 async def _ollama_unload(model: ModelName) -> None:
     """Tell Ollama to release the model from memory via keep_alive=0."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(
-                f"{settings.OLLAMA_HOST}/api/generate",
-                json={"model": model.value, "keep_alive": 0},
-            )
-    except Exception as e:
-        logger.warning("Failed to unload %s: %s", model.value, e)
+    import asyncio
+    
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{settings.OLLAMA_HOST}/api/generate",
+                    json={"model": model.value, "keep_alive": 0},
+                )
+                if response.status_code == 200:
+                    return  # Success, exit early
+                logger.warning("Unload attempt %d for %s returned status %d", 
+                             attempt + 1, model.value, response.status_code)
+        except Exception as e:
+            logger.warning("Unload attempt %d for %s failed: %s", 
+                         attempt + 1, model.value, e)
+        
+        if attempt < 2:  # Don't sleep after last attempt
+            await asyncio.sleep(2)
+    
+    logger.warning("Failed to unload %s after 3 attempts", model.value)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -198,7 +211,7 @@ async def _call_ollama_with_timeout(
     messages.append({"role": "user", "content": prompt})
 
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout_s, connect=5.0)
+        timeout=httpx.Timeout(timeout_s, connect=30.0)
     ) as client:
         t0 = time.perf_counter()
         resp = await asyncio.wait_for(

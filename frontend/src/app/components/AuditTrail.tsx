@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import { api, type AuditRecord, timeAgo, modelClass, modelLabel } from "@/lib/api";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { useCachedFetch } from "@/lib/cache-manager";
+import { useAdaptivePolling } from "@/lib/adaptive-poller";
 
 function ReasoningChain({ chain }: { chain: string[] }) {
   if (!chain?.length) return null;
@@ -28,7 +30,14 @@ function AuditRow({ record }: { record: AuditRecord }) {
   const chain: string[] = (() => {
     if (!record.reasoning_output) return [];
     const ro = record.reasoning_output as Record<string, unknown>;
+    // Handle direct reasoning_chain on the object
     if (Array.isArray(ro.reasoning_chain)) return ro.reasoning_chain as string[];
+    // Handle reasoning_output being an array of decision dicts
+    if (Array.isArray(ro)) {
+      for (const item of ro as Record<string, unknown>[]) {
+        if (item && Array.isArray(item.reasoning_chain)) return item.reasoning_chain as string[];
+      }
+    }
     return [];
   })();
 
@@ -123,20 +132,31 @@ export default function AuditTrail() {
   const [records, setRecords] = useState<AuditRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    try {
-      const data = await api.fetchAudit(50);
-      setRecords(data);
-    } catch { /* noop */ } finally {
-      setLoading(false);
+  // No WebSocket events for audit trail, use adaptive polling only
+  const {
+    data: polledData,
+    loading: polledLoading,
+  } = useAdaptivePolling<AuditRecord[]>(
+    async () => api.fetchAudit(50),
+    {
+      initialInterval: 15_000,
+      minInterval: 5_000,
+      maxInterval: 60_000,
+      enabled: true,
     }
-  }
+  );
 
+  // Update records from polling
   useEffect(() => {
-    load();
-    const t = setInterval(load, 15_000);
-    return () => clearInterval(t);
-  }, []);
+    if (polledData) {
+      setRecords(polledData);
+    }
+  }, [polledData]);
+
+  // Update loading state
+  useEffect(() => {
+    setLoading(polledLoading);
+  }, [polledLoading]);
 
   return (
     <div className="card" style={{ height: "100%" }}>
@@ -163,8 +183,8 @@ export default function AuditTrail() {
               </tr>
             </thead>
             <tbody>
-              {records.map((r) => (
-                <AuditRow key={r.audit_id} record={r} />
+              {records.map((r, i) => (
+                <AuditRow key={r.audit_id || `audit-${i}`} record={r} />
               ))}
             </tbody>
           </table>

@@ -53,13 +53,29 @@ async def enqueue_for_approval(
 ) -> UUID:
     """
     Move a high-cost action into the approval queue.
-    Sets action status → PENDING_APPROVAL.
+    Sets action status → PENDING_APPROVAL and inserts into approval_queue table.
     """
+    import json
+    from core.utils import safe_jsonable
+
     await db.execute("""
         UPDATE actions_taken
         SET status = $1, approval_required = TRUE
         WHERE id = $2
     """, ActionState.PENDING_APPROVAL.value, action_id)
+
+    # Insert into approval_queue table for proper frontend querying
+    await db.execute("""
+        INSERT INTO approval_queue
+            (action_id, anomaly_id, action_type, cost_impact_inr,
+             requested_by, status, payload)
+        VALUES ($1, $2, $3, $4, $5, 'pending', $6::jsonb)
+    """,
+        action_id, anomaly_id,
+        action_type.value, cost_impact_inr,
+        executed_by,
+        json.dumps(safe_jsonable(payload)),
+    )
 
     logger.info(
         "Action %s enqueued for approval (cost: ₹%.0f > threshold ₹%.0f)",
@@ -69,26 +85,28 @@ async def enqueue_for_approval(
 
 
 async def get_pending_approvals(db: asyncpg.Connection) -> list[dict]:
-    """Fetch all actions waiting for human approval."""
+    """Fetch all actions waiting for human approval from approval_queue table."""
     rows = await db.fetch("""
         SELECT
-            a.id,
-            a.action_type,
-            a.cost_saved,
-            a.executed_by,
-            a.executed_at,
-            a.payload,
-            a.status,
+            aq.id,
+            aq.action_id,
+            aq.anomaly_id,
+            aq.action_type,
+            aq.cost_impact_inr,
+            aq.requested_by,
+            aq.requested_at,
+            aq.status,
+            aq.review_note,
+            aq.expires_at,
             al.anomaly_type,
             al.severity,
             al.confidence,
-            al.reasoning,
             al.root_cause
-        FROM actions_taken a
-        LEFT JOIN anomaly_logs al ON a.anomaly_id = al.id
-        WHERE a.status = $1
-        ORDER BY a.executed_at DESC
-    """, ActionState.PENDING_APPROVAL.value)
+        FROM approval_queue aq
+        LEFT JOIN anomaly_logs al ON aq.anomaly_id = al.id
+        WHERE aq.status = 'pending'
+        ORDER BY aq.requested_at DESC
+    """)
     return [dict(r) for r in rows]
 
 
@@ -119,7 +137,25 @@ async def approve_action(
     if not row:
         raise ValueError(f"Action {action_id} not found or not in PENDING_APPROVAL state")
 
+    # Update approval_queue table too
+    await db.execute("""
+        UPDATE approval_queue
+        SET status = 'approved', reviewed_by = $1, reviewed_at = NOW()
+        WHERE action_id = $2
+    """, approved_by, action_id)
+
     logger.info("Action %s approved by %s", action_id, approved_by)
+    
+    # Publish approval_status_changed event (Requirement 7.4)
+    try:
+        from services.event_broadcaster import EventBroadcaster
+        approval_row = await db.fetchrow("""
+            SELECT * FROM approval_queue WHERE action_id = $1
+        """, action_id)
+        if approval_row:
+            await EventBroadcaster.publish_approval_status_changed(dict(approval_row))
+    except Exception as exc:
+        logger.warning("Failed to publish approval_status_changed event: %s", exc)
 
     # Trigger execution now that it's approved
     action = dict(row)
@@ -164,6 +200,18 @@ async def _execute_approved_action(db: asyncpg.Connection, action: dict) -> None
         """, ActionState.SUCCESS.value, action["id"])
 
         logger.info("Post-approval execution complete for action %s", action["id"])
+        
+        # Publish action_executed event (Requirement 7.3)
+        try:
+            from services.event_broadcaster import EventBroadcaster
+            action_row = await db.fetchrow(
+                "SELECT * FROM actions_taken WHERE id=$1", action["id"]
+            )
+            await EventBroadcaster.publish_action_executed(
+                dict(action_row), anomaly_id=action.get("anomaly_id")
+            )
+        except Exception as exc:
+            logger.warning("Failed to publish action_executed event: %s", exc)
 
     except Exception as exc:
         logger.error("Post-approval execution failed for action %s: %s", action["id"], exc)
@@ -184,23 +232,43 @@ async def reject_action(
     """
     Human rejects a pending action. Action is never executed.
     Transitions: PENDING_APPROVAL → REJECTED.
+    Removes from approval queue.
     """
     row = await db.fetchrow("""
         UPDATE actions_taken
         SET
             status = $1,
-            approved_by = $2,
-            approval_timestamp = NOW(),
-            rejection_reason = $3
+            rejection_reason = $2,
+            rejected_at = NOW(),
+            rejected_by = $3
         WHERE id = $4 AND status = $5
         RETURNING *
-    """, ActionState.REJECTED.value, rejected_by, reason, action_id,
+    """, ActionState.REJECTED.value, reason, rejected_by, action_id,
         ActionState.PENDING_APPROVAL.value)
 
     if not row:
         raise ValueError(f"Action {action_id} not found or not in PENDING_APPROVAL state")
 
+    # Remove from approval queue
+    await db.execute("""
+        DELETE FROM approval_queue WHERE action_id = $1
+    """, action_id)
+
     logger.info("Action %s rejected by %s: %s", action_id, rejected_by, reason)
+    
+    # Publish approval_status_changed event (Requirement 7.4)
+    try:
+        from services.event_broadcaster import EventBroadcaster
+        # Note: approval_row will be None after DELETE, so we create a synthetic event
+        await EventBroadcaster.publish_approval_status_changed({
+            "action_id": str(action_id),
+            "status": "rejected",
+            "reviewed_by": rejected_by,
+            "review_note": reason,
+        })
+    except Exception as exc:
+        logger.warning("Failed to publish approval_status_changed event: %s", exc)
+    
     return dict(row)
 
 

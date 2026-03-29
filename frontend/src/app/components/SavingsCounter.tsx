@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api, formatINR, type SavingsSummary } from "@/lib/api";
 import { TrendingUp, DollarSign, Shield, Clock, Target } from "lucide-react";
+import { useWebSocket, getWebSocketUrl } from "@/lib/websocket-client";
+import { useCachedFetch } from "@/lib/cache-manager";
+import { useAdaptivePolling } from "@/lib/adaptive-poller";
 
 function AnimatedNumber({ value }: { value: number }) {
   const [display, setDisplay] = useState(value);
@@ -65,21 +68,55 @@ export default function SavingsCounter() {
   const [data, setData] = useState<SavingsSummary | null>(null);
   const [error, setError] = useState(false);
 
-  async function load() {
-    try {
-      const s = await api.fetchSavings();
-      setData(s);
+  // WebSocket integration for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(getWebSocketUrl());
+
+  // Cached fetch with adaptive polling fallback
+  const {
+    data: cachedData,
+    loading,
+    error: fetchError,
+  } = useCachedFetch<SavingsSummary>('/api/savings/summary', {
+    pollingInterval: 0, // Polling handled by adaptive poller
+  });
+
+  // Adaptive polling (disabled when WebSocket connected)
+  const {
+    data: polledData,
+    isPaused,
+  } = useAdaptivePolling<SavingsSummary>(
+    async () => api.fetchSavings(),
+    {
+      initialInterval: 10_000,
+      minInterval: 5_000,
+      maxInterval: 60_000,
+      enabled: !isConnected, // Disable when WebSocket connected
+    }
+  );
+
+  // Update data from WebSocket messages
+  useEffect(() => {
+    if (lastMessage?.type === 'savings_updated') {
+      setData(lastMessage.data as SavingsSummary);
       setError(false);
-    } catch {
+    }
+  }, [lastMessage]);
+
+  // Update data from cached fetch or polling
+  useEffect(() => {
+    const newData = isConnected ? cachedData : polledData;
+    if (newData) {
+      setData(newData);
+      setError(false);
+    }
+  }, [cachedData, polledData, isConnected]);
+
+  // Update error state
+  useEffect(() => {
+    if (fetchError) {
       setError(true);
     }
-  }
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-  }, []);
+  }, [fetchError]);
 
   return (
     <div className="card" style={{ height: "100%" }}>

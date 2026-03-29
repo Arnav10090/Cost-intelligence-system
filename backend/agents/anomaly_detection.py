@@ -101,6 +101,13 @@ class AnomalyDetectionAgent(BaseAgent):
             JOIN vendors v ON t1.vendor_id = v.id
             WHERE t1.status IN ('approved', 'pending')
               AND t2.status IN ('approved', 'pending')
+              AND t2.id NOT IN (
+                SELECT al.entity_id FROM anomaly_logs al
+                JOIN actions_taken at ON al.id = at.anomaly_id
+                WHERE al.anomaly_type = 'duplicate_payment'
+                AND at.status IN ('success', 'pending_approval', 'approved')
+                AND at.action_type = 'payment_hold'
+              )
         """)
 
         seen_pairs: set[frozenset] = set()
@@ -173,7 +180,7 @@ class AnomalyDetectionAgent(BaseAgent):
         Trigger at P(breach) >= SLA_ESCALATION_THRESHOLD (0.70).
         """
         from core.config import settings
-        from services.action_handlers.sla_handler import (
+        from action_handlers.sla_handler import (
             get_at_risk_tickets, update_breach_probability,
         )
 
@@ -251,7 +258,7 @@ class AnomalyDetectionAgent(BaseAgent):
         Only flag if confidence > 0.50.
         """
         from core.config import settings
-        from services.action_handlers.license_handler import get_unused_licenses
+        from action_handlers.license_handler import get_unused_licenses
 
         self._start_timer()
         results = []

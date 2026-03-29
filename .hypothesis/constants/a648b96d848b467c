@@ -1,4 +1,0 @@
-# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\core\constants.py
-# hypothesis_version: 6.151.9
-
-[0.5, 0.6, 0.65, 0.75, 0.82, 0.85, 0.97, 0.99, 'ActionExecutionAgent', 'AuditAgent', 'CRITICAL', 'DecisionAgent', 'FallbackAgent', 'HIGH', 'INR', 'LOW', 'MEDIUM', 'OrchestratorAgent', 'Severity', 'actioned', 'approved', 'ci:alerts', 'ci:prewarm', 'ci:results', 'ci:tasks', 'deepseek-r1:7b', 'demo_trigger', 'detected', 'dismissed', 'duplicate_payment', 'email_sent', 'failed', 'infra_waste', 'license_deactivated', 'license_restored', 'llama3.2:3b', 'overridden', 'payment_hold', 'payment_release', 'pending', 'pending_approval', 'pricing_anomaly', 'qwen2.5:7b', 'reconcile', 'reconciliation_gap', 'rejected', 'resolved', 'resource_downsize', 'resource_restored', 'rolled_back', 'scan_duplicates', 'scan_infra', 'scan_licenses', 'scan_pricing', 'scan_sla', 'sla_escalation', 'sla_risk', 'success', 'unused_subscription', '₹']

@@ -1,3 +1,5 @@
+"use client";
+import { useEffect } from "react";
 import ModelStatus from "./components/ModelStatus";
 import SavingsCounter from "./components/SavingsCounter";
 import DemoTrigger from "./components/DemoTrigger";
@@ -5,8 +7,20 @@ import AnomalyFeed from "./components/AnomalyFeed";
 import ActionsPanel from "./components/ActionsPanel";
 import ApprovalQueue from "./components/ApprovalQueue";
 import AuditTrail from "./components/AuditTrail";
+import ConnectionStatus from "./components/ConnectionStatus";
+import { useDashboardData } from "@/lib/useDashboardData";
 
 export default function Dashboard() {
+  // Use aggregated endpoint for initial load with fallback to individual endpoints
+  const { data: dashboardData, loading, error, usedFallback } = useDashboardData();
+
+  // Log fallback usage for monitoring
+  useEffect(() => {
+    if (usedFallback) {
+      console.warn("Dashboard using fallback mode: aggregated endpoint unavailable");
+    }
+  }, [usedFallback]);
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg-base)" }}>
       {/* ── Sticky nav / model status bar ── */}
@@ -33,11 +47,21 @@ export default function Dashboard() {
           </p>
         </div>
         <div style={{
-          fontSize: 12, color: "var(--text-muted)", textAlign: "right",
-          display: "flex", flexDirection: "column", gap: 2,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "flex-end",
+          gap: 8,
         }}>
-          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>ET Gen AI Hackathon 2026</span>
-          <span>Problem Statement #3 — Prize Pool: ₹10,00,000</span>
+          {/* Connection Status Indicator */}
+          <ConnectionStatus />
+          
+          <div style={{
+            fontSize: 12, color: "var(--text-muted)", textAlign: "right",
+            display: "flex", flexDirection: "column", gap: 2,
+          }}>
+            <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>ET Gen AI Hackathon 2026</span>
+            <span>Problem Statement #3 — Prize Pool: ₹10,00,000</span>
+          </div>
         </div>
       </div>
 

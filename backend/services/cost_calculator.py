@@ -110,7 +110,7 @@ async def get_savings_summary(db: asyncpg.Connection) -> SavingsSummary:
         "SELECT COUNT(*) FROM actions_taken WHERE status = 'pending_approval'"
     ) or 0
 
-    return SavingsSummary(
+    summary = SavingsSummary(
         duplicate_payments_blocked=dup,
         unused_subscriptions_cancelled=sub,
         sla_penalties_avoided=sla,
@@ -121,6 +121,20 @@ async def get_savings_summary(db: asyncpg.Connection) -> SavingsSummary:
         anomalies_detected_count=int(anomalies_count),
         pending_approvals_count=int(pending_count),
     )
+    
+    # Publish savings_updated event (Requirement 7.5)
+    # Note: This publishes on every call. In production, you might want to
+    # cache and only publish when values actually change.
+    try:
+        from services.event_broadcaster import EventBroadcaster
+        await EventBroadcaster.publish_savings_updated(
+            summary.model_dump(),
+            delta=None  # Could track previous values to calculate delta
+        )
+    except Exception as exc:
+        logger.warning("Failed to publish savings_updated event: %s", exc)
+    
+    return summary
 
 
 async def get_savings_breakdown(db: asyncpg.Connection) -> dict:

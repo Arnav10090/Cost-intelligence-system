@@ -31,6 +31,29 @@ MAX_QUEUE_SIZE = 100             # drop oldest if queue grows beyond this
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# PUB/SUB CHANNELS — Event Broadcasting for WebSocket
+# ═══════════════════════════════════════════════════════════════════════════
+class EventChannel:
+    """Redis pub/sub channel constants for real-time event broadcasting."""
+    ANOMALY_CREATED = "ci:events:anomaly_created"
+    ACTION_EXECUTED = "ci:events:action_executed"
+    APPROVAL_STATUS_CHANGED = "ci:events:approval_status_changed"
+    SAVINGS_UPDATED = "ci:events:savings_updated"
+    SYSTEM_STATUS_CHANGED = "ci:events:system_status_changed"
+    
+    @classmethod
+    def all_channels(cls) -> list[str]:
+        """Returns list of all event channels for subscription."""
+        return [
+            cls.ANOMALY_CREATED,
+            cls.ACTION_EXECUTED,
+            cls.APPROVAL_STATUS_CHANGED,
+            cls.SAVINGS_UPDATED,
+            cls.SYSTEM_STATUS_CHANGED,
+        ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # LIFECYCLE
 # ═══════════════════════════════════════════════════════════════════════════
 async def init_redis() -> None:
@@ -167,6 +190,96 @@ async def enqueue_scan(task_type: TaskType, priority: str = "NORMAL") -> str:
     )
     await publish_task(task)
     return task.task_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PUB/SUB — Event Broadcasting
+# ═══════════════════════════════════════════════════════════════════════════
+async def publish_event(channel: str, event_data: dict) -> None:
+    """
+    Publish an event to a Redis pub/sub channel.
+    
+    Args:
+        channel: Redis channel name (use EventChannel constants)
+        event_data: Event payload to broadcast (will be JSON serialized)
+    
+    Requirements: 7.1, 7.6
+    """
+    try:
+        r = get_redis()
+        payload = json.dumps(event_data, default=str)
+        await r.publish(channel, payload)
+        logger.debug("Event published to %s: %s", channel, event_data.get("type", "unknown"))
+    except Exception as e:
+        logger.error("Failed to publish event to %s: %s", channel, e)
+        # Don't raise — event broadcasting should not block main flow
+
+
+async def subscribe_to_events(
+    channels: list[str],
+) -> AsyncGenerator[tuple[str, dict], None]:
+    """
+    Subscribe to Redis pub/sub channels and yield incoming events.
+    
+    Args:
+        channels: List of channel names to subscribe to
+    
+    Yields:
+        Tuple of (channel_name, event_data)
+    
+    Requirements: 7.6
+    
+    Example:
+        async for channel, event in subscribe_to_events(EventChannel.all_channels()):
+            print(f"Received event on {channel}: {event}")
+    """
+    r = get_redis()
+    pubsub = r.pubsub()
+    
+    try:
+        # Subscribe to all specified channels
+        await pubsub.subscribe(*channels)
+        logger.info("Subscribed to channels: %s", channels)
+        
+        while True:
+            try:
+                # Listen for messages with timeout to allow graceful shutdown
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True,
+                    timeout=1.0
+                )
+                
+                if message is None:
+                    # Timeout — yield control to event loop
+                    await asyncio.sleep(0)
+                    continue
+                
+                if message["type"] == "message":
+                    channel = message["channel"]
+                    try:
+                        event_data = json.loads(message["data"])
+                        logger.debug("Event received from %s", channel)
+                        yield (channel, event_data)
+                    except json.JSONDecodeError as e:
+                        logger.error("Failed to parse event from %s: %s", channel, e)
+                        continue
+                        
+            except aioredis.ConnectionError as e:
+                logger.error("Redis pub/sub connection lost: %s — retrying in 5s", e)
+                await asyncio.sleep(5)
+                # Attempt to resubscribe
+                await pubsub.subscribe(*channels)
+                
+    except asyncio.CancelledError:
+        logger.info("Event subscription cancelled")
+        raise
+    except Exception as e:
+        logger.error("Event subscription error: %s", e)
+        raise
+    finally:
+        await pubsub.unsubscribe(*channels)
+        await pubsub.aclose()
+        logger.info("Unsubscribed from channels: %s", channels)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

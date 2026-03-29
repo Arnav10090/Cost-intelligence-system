@@ -2,8 +2,15 @@
 import { useEffect, useState } from "react";
 import { api, type Anomaly, formatINR, timeAgo, anomalyTypeLabel } from "@/lib/api";
 import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { useWebSocket, getWebSocketUrl } from "@/lib/websocket-client";
+import { useCachedFetch } from "@/lib/cache-manager";
+import { useAdaptivePolling } from "@/lib/adaptive-poller";
 
-function SeverityBadge({ sev }: { sev: string }) {
+function SeverityBadge({ sev }: { sev: string | null | undefined }) {
+  if (!sev) {
+    return <span className="badge badge-muted">—</span>;
+  }
+  
   const cls: Record<string, string> = {
     CRITICAL: "badge-critical",
     HIGH:     "badge-high",
@@ -33,11 +40,11 @@ function AnomalyRow({ anomaly, idx }: { anomaly: Anomaly; idx: number }) {
             <div className="progress" style={{ width: 48 }}>
               <div
                 className="progress-bar"
-                style={{ width: `${Math.round(anomaly.confidence * 100)}%` }}
+                style={{ width: `${anomaly.confidence != null && !isNaN(Number(anomaly.confidence)) ? Math.round(Number(anomaly.confidence) * 100) : 0}%` }}
               />
             </div>
             <span className="mono" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-              {Math.round(anomaly.confidence * 100)}%
+              {anomaly.confidence != null && !isNaN(Number(anomaly.confidence)) ? `${Math.round(Number(anomaly.confidence) * 100)}%` : '—'}
             </span>
           </div>
         </td>
@@ -101,20 +108,51 @@ export default function AnomalyFeed() {
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    try {
-      const data = await api.fetchAnomalies(20);
-      setAnomalies(data);
-    } catch { /* noop */ } finally {
-      setLoading(false);
-    }
-  }
+  // WebSocket integration for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(getWebSocketUrl());
 
+  // Cached fetch
+  const {
+    data: cachedData,
+    loading: cachedLoading,
+  } = useCachedFetch<Anomaly[]>('/api/anomalies/?limit=20', {
+    pollingInterval: 0,
+  });
+
+  // Adaptive polling (disabled when WebSocket connected)
+  const {
+    data: polledData,
+    loading: polledLoading,
+  } = useAdaptivePolling<Anomaly[]>(
+    async () => api.fetchAnomalies(20),
+    {
+      initialInterval: 10_000,
+      minInterval: 5_000,
+      maxInterval: 60_000,
+      enabled: !isConnected,
+    }
+  );
+
+  // Update anomalies from WebSocket messages
   useEffect(() => {
-    load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-  }, []);
+    if (lastMessage?.type === 'anomaly_created') {
+      const newAnomaly = lastMessage.data as Anomaly;
+      setAnomalies(prev => [newAnomaly, ...prev].slice(0, 20));
+    }
+  }, [lastMessage]);
+
+  // Update anomalies from cached fetch or polling
+  useEffect(() => {
+    const newData = isConnected ? cachedData : polledData;
+    if (newData) {
+      setAnomalies(newData);
+    }
+  }, [cachedData, polledData, isConnected]);
+
+  // Update loading state
+  useEffect(() => {
+    setLoading(isConnected ? cachedLoading : polledLoading);
+  }, [cachedLoading, polledLoading, isConnected]);
 
   return (
     <div className="card" style={{ height: "100%" }}>
@@ -145,7 +183,7 @@ export default function AnomalyFeed() {
             </thead>
             <tbody>
               {anomalies.map((a, i) => (
-                <AnomalyRow key={a.id} anomaly={a} idx={i} />
+                <AnomalyRow key={a.id || `anomaly-${i}`} anomaly={a} idx={i} />
               ))}
             </tbody>
           </table>

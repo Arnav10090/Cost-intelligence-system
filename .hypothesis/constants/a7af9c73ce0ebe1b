@@ -1,4 +1,0 @@
-# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\agents\decision_agent.py
-# hypothesis_version: 6.151.9
-
-[0.8, 'MEDIUM', 'action', 'action_details', 'confidence', 'cost_impact_inr', 'duplicate_payment', 'evidence', 'license', 'licenses', 'no_action', 'pricing_anomaly', 'reasoning_chain', 'reconciliation_gap', 'root_cause', 'sla_metrics', 'sla_risk', 'ticket', 'transactions', 'unused_subscription', 'urgency']

@@ -2,6 +2,9 @@
 import { useEffect, useState } from "react";
 import { api, type ApprovalQueueItem, formatINR, timeAgo } from "@/lib/api";
 import { Check, X } from "lucide-react";
+import { useWebSocket, getWebSocketUrl } from "@/lib/websocket-client";
+import { useCachedFetch } from "@/lib/cache-manager";
+import { useAdaptivePolling } from "@/lib/adaptive-poller";
 
 export default function ApprovalQueue() {
   const [items, setItems] = useState<ApprovalQueueItem[]>([]);
@@ -10,26 +13,64 @@ export default function ApprovalQueue() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  async function load() {
-    try {
-      const data = await api.fetchApprovals();
-      setItems(data.filter((i) => i.status === "pending"));
-    } catch { /* noop */ } finally {
-      setLoading(false);
-    }
-  }
+  // WebSocket integration for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(getWebSocketUrl());
 
+  // Cached fetch
+  const {
+    data: cachedData,
+    loading: cachedLoading,
+    refetch,
+  } = useCachedFetch<ApprovalQueueItem[]>('/api/approvals/', {
+    pollingInterval: 0,
+  });
+
+  // Adaptive polling (disabled when WebSocket connected)
+  const {
+    data: polledData,
+    loading: polledLoading,
+    refetch: polledRefetch,
+  } = useAdaptivePolling<ApprovalQueueItem[]>(
+    async () => api.fetchApprovals(),
+    {
+      initialInterval: 5_000,
+      minInterval: 5_000,
+      maxInterval: 60_000,
+      enabled: !isConnected,
+    }
+  );
+
+  // Update items from WebSocket messages
   useEffect(() => {
-    load();
-    const t = setInterval(load, 5_000);
-    return () => clearInterval(t);
-  }, []);
+    if (lastMessage?.type === 'approval_pending') {
+      const newApproval = lastMessage.data as ApprovalQueueItem;
+      setItems(prev => [newApproval, ...prev]);
+    }
+  }, [lastMessage]);
+
+  // Update items from cached fetch or polling
+  useEffect(() => {
+    const newData = isConnected ? cachedData : polledData;
+    if (newData) {
+      setItems(newData.filter((i) => i.status === "pending"));
+    }
+  }, [cachedData, polledData, isConnected]);
+
+  // Update loading state
+  useEffect(() => {
+    setLoading(isConnected ? cachedLoading : polledLoading);
+  }, [cachedLoading, polledLoading, isConnected]);
 
   async function handleApprove(id: string) {
     setProcessing((p) => ({ ...p, [id]: true }));
     try {
       await api.approveAction(id);
-      await load();
+      // Refetch data after approval
+      if (isConnected) {
+        await refetch();
+      } else {
+        await polledRefetch();
+      }
     } catch { /* noop */ } finally {
       setProcessing((p) => ({ ...p, [id]: false }));
     }
@@ -42,7 +83,12 @@ export default function ApprovalQueue() {
       await api.rejectAction(id, rejectReason);
       setRejectingId(null);
       setRejectReason("");
-      await load();
+      // Refetch data after rejection
+      if (isConnected) {
+        await refetch();
+      } else {
+        await polledRefetch();
+      }
     } catch { /* noop */ } finally {
       setProcessing((p) => ({ ...p, [id]: false }));
     }
@@ -74,9 +120,9 @@ export default function ApprovalQueue() {
           </div>
         ) : (
           <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-            {items.map((item) => (
+            {items.map((item, i) => (
               <div
-                key={item.id}
+                key={item.id || `approval-${i}`}
                 style={{
                   background: "var(--bg-elevated)",
                   border: "1px solid var(--border)",

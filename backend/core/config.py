@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # DeepSeek is invoked for ALL HIGH/CRITICAL — see blueprint §3 UPDATE note.
     DEEPSEEK_TRIGGER_SEVERITY: str = "HIGH"
     DEEPSEEK_CONFIDENCE_THRESHOLD: float = 0.80   # kept for legacy gate logic
-    FALLBACK_TIMEOUT_MS: int = 8000
+    FALLBACK_TIMEOUT_MS: int = 120000  # 2 minutes for CPU-based 7B model inference
     MAX_DEEPSEEK_CALLS_PER_HOUR: int = 10
     MAX_OLLAMA_WORKERS: int = 5
 

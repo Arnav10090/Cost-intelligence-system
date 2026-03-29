@@ -8,6 +8,7 @@ GET  /api/demo/scenarios                — list available demo scenarios
 POST /api/demo/reset                    — truncates + re-seeds demo data
 """
 import json
+import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -17,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.constants import TaskType
 from db.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 
@@ -167,7 +170,8 @@ async def _inject_sla_breach(db: asyncpg.Connection) -> dict:
         "DELETE FROM sla_metrics WHERE ticket_id LIKE 'TKT-DEMO-%'"
     )
 
-    now = datetime.now(timezone.utc)
+    # Use naive datetime since opened_at column is TIMESTAMP (not TIMESTAMPTZ)
+    now = datetime.utcnow()
     opened_at = now - timedelta(hours=3.3)
     sla_ticket_id = uuid.uuid4()
 
@@ -210,14 +214,18 @@ async def _inject_unused_subscriptions(db: asyncpg.Connection) -> dict:
     task_id = str(uuid.uuid4())
 
     # Clean up previous demo licenses
-    await db.execute(
-        "DELETE FROM licenses WHERE assigned_email LIKE 'demo-ghost-%'"
-    )
+    try:
+        await db.execute(
+            "DELETE FROM licenses WHERE assigned_email LIKE 'demo-ghost-%'"
+        )
+    except Exception as e:
+        logger.warning("Demo license cleanup: %s", e)
 
     license_ids = []
     tools = ["Slack", "Jira", "Zoom", "Figma", "Notion"]
     total_monthly = Decimal("0.00")
-    now = datetime.now(timezone.utc)
+    # Use naive datetime since last_login column is TIMESTAMP (not TIMESTAMPTZ)
+    now = datetime.utcnow()
 
     for i, tool in enumerate(tools):
         lic_id = uuid.uuid4()
@@ -230,6 +238,7 @@ async def _inject_unused_subscriptions(db: asyncpg.Connection) -> dict:
                 (id, tool_name, assigned_email, last_login, is_active,
                  monthly_cost, employee_active)
             VALUES ($1, $2, $3, $4, TRUE, $5, FALSE)
+            ON CONFLICT (id) DO NOTHING
         """, lic_id, tool,
             f"demo-ghost-{i+1}@company.local",
             now - timedelta(days=120 + i * 10),   # last login 120-160 days ago

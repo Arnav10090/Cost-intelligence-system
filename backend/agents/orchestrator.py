@@ -170,12 +170,26 @@ class OrchestratorAgent(BaseAgent):
     async def _persist_anomaly(self, detection: DetectionResult) -> UUID:
         """Write detection to anomaly_logs. Returns anomaly UUID."""
         import json
+        
+        # Check if this entity was already actioned in the last 24 hours
+        existing = await self.db.fetchrow("""
+            SELECT id FROM anomaly_logs 
+            WHERE entity_id = $1 
+            AND anomaly_type = $2
+            AND status IN ('actioned', 'pending_approval')
+            AND detected_at > NOW() - INTERVAL '24 hours'
+        """, detection.entity_id, detection.anomaly_type.value)
+
+        if existing:
+            logger.info("Skipping duplicate detection for entity %s (already actioned)", detection.entity_id)
+            return existing["id"]
+        
         row = await self.db.fetchrow("""
             INSERT INTO anomaly_logs (
                 anomaly_type, entity_id, entity_table, confidence,
                 severity, cost_impact_inr, status, model_used
             ) VALUES ($1, $2, $3, $4, $5, $6, 'detected', $7)
-            RETURNING id
+            RETURNING *
         """,
             detection.anomaly_type.value,
             detection.entity_id,
@@ -185,7 +199,16 @@ class OrchestratorAgent(BaseAgent):
             float(detection.cost_impact_inr),
             detection.model_used.value if detection.model_used else None,
         )
-        return row["id"]
+        anomaly_id = row["id"]
+        
+        # Publish anomaly_created event (Requirement 7.2)
+        try:
+            from services.event_broadcaster import EventBroadcaster
+            await EventBroadcaster.publish_anomaly_created(dict(row))
+        except Exception as exc:
+            logger.warning("Failed to publish anomaly_created event: %s", exc)
+        
+        return anomaly_id
 
     async def _update_anomaly_reasoning(
         self, anomaly_id: UUID, decision: DecisionResult

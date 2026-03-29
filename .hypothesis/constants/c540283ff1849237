@@ -1,4 +1,0 @@
-# file: C:\Users\Asus\AppData\Roaming\Python\Python312\site-packages\fastapi\security\oauth2.py
-# hypothesis_version: 6.151.9
-
-['Authorization', 'Bearer', 'Not authenticated', 'WWW-Authenticate', 'authorizationUrl', 'bearer', 'password', 'refreshUrl', 'scopes', 'tokenUrl']

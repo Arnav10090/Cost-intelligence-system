@@ -1,4 +1,0 @@
-# file: C:\Users\Asus\Downloads\ET-Genai-hackathon\cost-intelligence\backend\services\approval_service.py
-# hypothesis_version: 6.151.9
-
-['Approved by ', 'action_id', 'action_type', 'amount', 'anomaly_id', 'approved_by', 'id', 'invoice_id', 'license_id', 'overridden_by', 'payload', 'reason', 'rollback_payload', 'ticket_id']

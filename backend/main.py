@@ -14,11 +14,12 @@ import logging
 from contextlib import asynccontextmanager
 from importlib import import_module
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from db.database import init_db, close_db, execute_schema, get_connection
+from middleware.etag_middleware import ETagMiddleware
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -78,6 +79,15 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("·  Orchestrator consumer not started: %s", exc)
 
+    # ── 7. WebSocket event listener ───────────────────────────────────────────
+    try:
+        from services.websocket_server import get_websocket_manager
+        ws_manager = get_websocket_manager()
+        ws_manager.start_listener_task()
+        logger.info("✓  WebSocket event listener — broadcasting Redis events")
+    except Exception as exc:
+        logger.warning("·  WebSocket event listener not started: %s", exc)
+
     logger.info("═" * 55)
     logger.info("  Ready → http://localhost:8000/docs")
     logger.info("═" * 55)
@@ -86,6 +96,15 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     logger.info("Shutting down gracefully...")
+    
+    # Stop WebSocket event listener
+    try:
+        from services.websocket_server import get_websocket_manager
+        ws_manager = get_websocket_manager()
+        await ws_manager.stop_listener_task()
+    except Exception:
+        pass
+    
     if hasattr(app.state, "consumer_task"):
         app.state.consumer_task.cancel()
         try:
@@ -167,13 +186,19 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",   # Next.js dev
+        "http://localhost:3000",   # Next.js dev (default port)
+        "http://localhost:3001",   # Next.js dev (alternate port)
         "http://frontend:3000",    # Docker network
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── ETag Middleware ───────────────────────────────────────────────────────────
+# Apply ETag-based HTTP caching to all GET endpoints
+# Requirements: 2.1 (Backend SHALL generate and return ETag headers for all GET endpoints)
+app.add_middleware(ETagMiddleware)
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -191,6 +216,8 @@ _OPTIONAL_ROUTERS = [
     "routers.audit",
     "routers.savings",
     "routers.demo",
+    "routers.dashboard",
+    "routers.system",
 ]
 
 for _mod_path in _OPTIONAL_ROUTERS:
@@ -280,3 +307,71 @@ async def routing_config():
         "deepseek_calls_this_hour": deepseek_calls_this_hour(),
         "deepseek_budget_remaining": deepseek_budget_remaining(),
     }
+
+
+
+# ── WebSocket endpoint ────────────────────────────────────────────────────────
+@app.websocket("/ws/dashboard")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time dashboard updates.
+    
+    This endpoint provides real-time updates to the dashboard by broadcasting
+    events from Redis pub/sub channels. Clients connect to this endpoint to
+    receive live updates when anomalies are created, actions are executed,
+    approvals change status, savings are updated, or system status changes.
+    
+    Authentication: Currently accepts all connections. In production, validate
+    tokens from headers or query parameters.
+    
+    Message Format: JSON with {type, timestamp, data} structure
+    
+    Requirements: 1.1, 1.4
+    
+    Example client connection:
+        const ws = new WebSocket('ws://localhost:8000/ws/dashboard');
+        ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            console.log('Received:', message.type, message.data);
+        };
+    """
+    from services.websocket_server import get_websocket_manager
+    
+    ws_manager = get_websocket_manager()
+    client_id = None
+    
+    try:
+        # Connect and authenticate
+        client_id = await ws_manager.connect(websocket)
+        logger.info("WebSocket client connected: %s", client_id)
+        
+        # Keep connection alive and handle incoming messages
+        # (Currently we only broadcast from server to client, but this loop
+        # keeps the connection open and allows for future client->server messages)
+        while True:
+            try:
+                # Wait for messages from client (with timeout to check connection health)
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                # Currently we don't process client messages, but log them
+                logger.debug("Received message from client %s: %s", client_id, data)
+            except asyncio.TimeoutError:
+                # Send ping to keep connection alive
+                try:
+                    from datetime import datetime, timezone
+                    await websocket.send_json({
+                        "type": "ping",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "data": {}
+                    })
+                except Exception:
+                    # Connection is dead
+                    break
+            
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected: %s", client_id)
+    except Exception as e:
+        logger.error("WebSocket error for client %s: %s", client_id, e)
+    finally:
+        # Clean up connection
+        if client_id:
+            await ws_manager.disconnect(client_id)

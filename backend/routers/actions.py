@@ -26,7 +26,7 @@ async def list_actions(
         conditions.append(f"a.action_type = ${len(params)}")
     params.append(limit)
     rows = await db.fetch(f"""
-        SELECT a.*, al.anomaly_type, al.severity, al.confidence
+        SELECT a.*, al.anomaly_type, al.severity, al.confidence, al.model_used AS anomaly_model
         FROM actions_taken a
         LEFT JOIN anomaly_logs al ON a.anomaly_id = al.id
         WHERE {' AND '.join(conditions)}

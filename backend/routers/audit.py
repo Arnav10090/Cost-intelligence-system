@@ -59,12 +59,36 @@ async def override_audit(
     body: OverrideBody,
     db: asyncpg.Connection = Depends(get_db),
 ):
-    """Human override — marks audit record and updates status. Blueprint §10."""
+    """
+    Override an audit trail decision and release related payment holds.
+    Blueprint §10 - Human override capability.
+    """
+    # Update audit record status
     row = await db.fetchrow("""
         UPDATE audit_trail
-        SET final_status='overridden', override_reason=$2
-        WHERE audit_id=$1 RETURNING audit_id, final_status
-    """, audit_id, f"{body.override_reason} (by {body.overridden_by})")
+        SET final_status = 'overridden',
+            override_reason = $2,
+            overridden_at = NOW(),
+            overridden_by = $3
+        WHERE audit_id = $1
+        RETURNING audit_id, final_status
+    """, audit_id, body.override_reason, body.overridden_by)
+    
     if not row:
         raise HTTPException(status_code=404, detail="Audit record not found")
-    return dict(row)
+    
+    # Release related payment holds if applicable
+    await db.execute("""
+        UPDATE actions_taken 
+        SET status = 'rolled_back',
+            rolled_back_at = NOW()
+        WHERE anomaly_id IN (
+            SELECT input_data->>'anomaly_id' 
+            FROM audit_trail 
+            WHERE audit_id = $1
+        )
+        AND action_type = 'payment_hold'
+        AND status = 'success'
+    """, audit_id)
+    
+    return {"status": "ok", "message": "Audit decision overridden"}

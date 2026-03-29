@@ -2,28 +2,49 @@
 import { useEffect, useState } from "react";
 import { api, type SystemStatus, modelLabel } from "@/lib/api";
 import { Cpu, Clock, AlertTriangle, Activity } from "lucide-react";
+import { useWebSocket, getWebSocketUrl } from "@/lib/websocket-client";
+import { useCachedFetch } from "@/lib/cache-manager";
 
 export default function ModelStatus() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState(false);
 
-  async function load() {
-    try {
-      const s = await api.fetchSystemStatus();
-      setStatus(s);
+  // WebSocket integration for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(getWebSocketUrl());
+
+  // Cached fetch with fixed 30-second polling (not adaptive)
+  const {
+    data: cachedData,
+    error: fetchError,
+  } = useCachedFetch<SystemStatus>('/api/system/status', {
+    pollingInterval: 30_000, // Fixed 30-second interval
+  });
+
+  // Update status from WebSocket messages
+  useEffect(() => {
+    if (lastMessage?.type === 'system_status_changed') {
+      setStatus(lastMessage.data as SystemStatus);
       setLastUpdated(new Date());
       setError(false);
-    } catch {
+    }
+  }, [lastMessage]);
+
+  // Update status from cached fetch
+  useEffect(() => {
+    if (cachedData) {
+      setStatus(cachedData);
+      setLastUpdated(new Date());
+      setError(false);
+    }
+  }, [cachedData]);
+
+  // Update error state
+  useEffect(() => {
+    if (fetchError) {
       setError(true);
     }
-  }
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 30_000);
-    return () => clearInterval(t);
-  }, []);
+  }, [fetchError]);
 
   const deepseek = status?.models.find((m) => m.name.includes("deepseek"));
   const qwen     = status?.models.find((m) => m.name.includes("qwen"));

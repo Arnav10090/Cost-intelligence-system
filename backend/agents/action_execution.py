@@ -109,6 +109,19 @@ class ActionExecutionAgent(BaseAgent):
             "UPDATE actions_taken SET status=$1 WHERE id=$2",
             result.action_state.value, action_id,
         )
+        
+        # Publish action_executed event (Requirement 7.3)
+        if result.success and result.action_state == ActionState.SUCCESS:
+            try:
+                from services.event_broadcaster import EventBroadcaster
+                action_row = await self.db.fetchrow(
+                    "SELECT * FROM actions_taken WHERE id=$1", action_id
+                )
+                await EventBroadcaster.publish_action_executed(
+                    dict(action_row), anomaly_id=anomaly_id
+                )
+            except Exception as exc:
+                logger.warning("Failed to publish action_executed event: %s", exc)
 
         return result
 
@@ -189,7 +202,7 @@ class ActionExecutionAgent(BaseAgent):
     async def _deactivate_license(self, details, action_id, anomaly_id, decision):
         from action_handlers.license_handler import deactivate_license
 
-        license_id = details.get("license_id") or str(decision.entity_id or "")
+        license_id = details.get("license_id") or decision.action_details.get("license_id", "")
         if not license_id:
             raise ValueError("No license_id for license_deactivated action")
 
@@ -238,7 +251,7 @@ class ActionExecutionAgent(BaseAgent):
             VALUES ('pricing_anomaly', $1, 'vendors', $2, $3, $4,
                     'actioned', $5, $6)
         """,
-            decision.entity_id,
+            details.get("vendor_id"),
             decision.confidence,
             decision.urgency.value if decision.urgency else "MEDIUM",
             float(decision.cost_impact_inr),
@@ -298,11 +311,12 @@ class ActionExecutionAgent(BaseAgent):
         payload: dict,
         model_used: Optional[ModelName],
     ) -> UUID:
+        rollback = self._build_rollback_payload_from_details(action_type, payload)
         row = await self.db.fetchrow("""
             INSERT INTO actions_taken
                 (id, anomaly_id, action_type, executed_by, cost_saved,
-                 status, approval_required, payload)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+                 status, approval_required, payload, rollback_payload)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb)
             RETURNING id
         """,
             uuid.uuid4(), anomaly_id,
@@ -311,5 +325,18 @@ class ActionExecutionAgent(BaseAgent):
             ActionState.PENDING_APPROVAL.value if approval_required else ActionState.PENDING.value,
             approval_required,
             json.dumps(safe_jsonable(payload)),
+            json.dumps(safe_jsonable(rollback)),
         )
         return row["id"]
+
+    @staticmethod
+    def _build_rollback_payload_from_details(action_type: ActionType, details: dict) -> dict:
+        """Build a rollback payload from action details for persistence."""
+        rollback = {"action_type": action_type.value}
+        if action_type == ActionType.PAYMENT_HOLD:
+            rollback["invoice_id"] = details.get("invoice_id") or details.get("duplicate_id", "")
+        elif action_type == ActionType.LICENSE_DEACTIVATED:
+            rollback["license_id"] = details.get("license_id", "")
+        elif action_type == ActionType.SLA_ESCALATION:
+            rollback["ticket_id"] = details.get("ticket_id", "")
+        return rollback

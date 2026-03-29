@@ -45,6 +45,8 @@ export interface Action {
   confidence?: number;
   approval_required?: boolean;
   rollback_payload?: Record<string, unknown>;
+  model_used?: string;
+  anomaly_model?: string;  // Model used from joined anomaly_logs
 }
 
 export interface AuditRecord {
@@ -174,9 +176,10 @@ export const api = {
 
 // ── Utility: Indian number format ────────────────────────────────────────────
 
-export function formatINR(amount: number | string): string {
-  const n = typeof amount === "string" ? parseFloat(amount) : amount;
-  if (isNaN(n)) return "₹0";
+export function formatINR(amount: number | string | null | undefined): string {
+  if (amount == null) return "₹0";
+  const n = typeof amount === "string" ? parseFloat(amount) : Number(amount);
+  if (isNaN(n) || !isFinite(n)) return "₹0";
   // Indian number system: last 3 digits, then groups of 2
   const parts = Math.abs(Math.round(n)).toString().split(".");
   const main = parts[0];
@@ -189,13 +192,20 @@ export function formatINR(amount: number | string): string {
   return `₹${result}`;
 }
 
-export function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr);
-  const secs = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
+export function timeAgo(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "—";
+    const secs = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (secs < 0) return "just now";
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    return `${Math.floor(secs / 86400)}d ago`;
+  } catch {
+    return "—";
+  }
 }
 
 export function severityColor(sev: string): string {
@@ -208,23 +218,24 @@ export function severityColor(sev: string): string {
   }
 }
 
-export function modelClass(model?: string): string {
-  if (!model) return "";
+export function modelClass(model?: string | null): string {
+  if (!model) return "model-unknown";
   if (model.includes("deepseek")) return "model-deepseek";
   if (model.includes("qwen"))     return "model-qwen";
   if (model.includes("llama"))    return "model-llama";
-  return "";
+  return "model-unknown";
 }
 
-export function modelLabel(model?: string): string {
-  if (!model) return "—";
+export function modelLabel(model?: string | null): string {
+  if (!model) return "Unknown";
   if (model.includes("deepseek")) return "DeepSeek";
   if (model.includes("qwen"))     return "Qwen";
   if (model.includes("llama"))    return "Llama";
   return model;
 }
 
-export function anomalyTypeLabel(type: string): string {
+export function anomalyTypeLabel(type: string | null | undefined): string {
+  if (!type) return "Unknown";
   const map: Record<string, string> = {
     duplicate_payment:   "Duplicate Payment",
     unused_subscription: "Unused License",

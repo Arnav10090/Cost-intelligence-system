@@ -4,6 +4,9 @@ import { api, type Action, formatINR, timeAgo, actionTypeLabel, modelClass, mode
 import {
   CreditCard, Mail, Shield, Users, AlertTriangle, Tag, Server,
 } from "lucide-react";
+import { useWebSocket, getWebSocketUrl } from "@/lib/websocket-client";
+import { useCachedFetch } from "@/lib/cache-manager";
+import { useAdaptivePolling } from "@/lib/adaptive-poller";
 
 const ACTION_ICONS: Record<string, React.ReactNode> = {
   payment_hold:              <CreditCard size={14} color="var(--sev-critical)" />,
@@ -16,7 +19,10 @@ const ACTION_ICONS: Record<string, React.ReactNode> = {
   resource_downsize:         <Server size={14} color="var(--accent)" />,
 };
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }: { status: string | null | undefined }) {
+  if (!status) {
+    return <span className="badge badge-muted">—</span>;
+  }
   const map: Record<string, string> = {
     success:          "badge-success",
     pending:          "badge-pending",
@@ -33,25 +39,56 @@ export default function ActionsPanel() {
   const [actions, setActions] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
-    try {
-      const data = await api.fetchActions(20);
-      setActions(data);
-    } catch { /* noop */ } finally {
-      setLoading(false);
-    }
-  }
+  // WebSocket integration for real-time updates
+  const { isConnected, lastMessage } = useWebSocket(getWebSocketUrl());
 
+  // Cached fetch
+  const {
+    data: cachedData,
+    loading: cachedLoading,
+  } = useCachedFetch<Action[]>('/api/actions/?limit=20', {
+    pollingInterval: 0,
+  });
+
+  // Adaptive polling (disabled when WebSocket connected)
+  const {
+    data: polledData,
+    loading: polledLoading,
+  } = useAdaptivePolling<Action[]>(
+    async () => api.fetchActions(20),
+    {
+      initialInterval: 10_000,
+      minInterval: 5_000,
+      maxInterval: 60_000,
+      enabled: !isConnected,
+    }
+  );
+
+  // Update actions from WebSocket messages
   useEffect(() => {
-    load();
-    const t = setInterval(load, 10_000);
-    return () => clearInterval(t);
-  }, []);
+    if (lastMessage?.type === 'action_executed') {
+      const newAction = lastMessage.data as Action;
+      setActions(prev => [newAction, ...prev].slice(0, 20));
+    }
+  }, [lastMessage]);
+
+  // Update actions from cached fetch or polling
+  useEffect(() => {
+    const newData = isConnected ? cachedData : polledData;
+    if (newData) {
+      setActions(newData);
+    }
+  }, [cachedData, polledData, isConnected]);
+
+  // Update loading state
+  useEffect(() => {
+    setLoading(isConnected ? cachedLoading : polledLoading);
+  }, [cachedLoading, polledLoading, isConnected]);
 
   const counts = {
     success:  actions.filter((a) => a.status === "success").length,
-    pending:  actions.filter((a) => a.status.includes("pending")).length,
-    failed:   actions.filter((a) => ["failed","rejected","rolled_back"].includes(a.status)).length,
+    pending:  actions.filter((a) => a.status && a.status.includes("pending")).length,
+    failed:   actions.filter((a) => a.status && ["failed","rejected","rolled_back"].includes(a.status)).length,
   };
 
   return (
@@ -82,7 +119,7 @@ export default function ActionsPanel() {
             </thead>
             <tbody>
               {actions.map((a, i) => (
-                <tr key={a.id} className="anim-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
+                <tr key={a.id || `action-${i}`} className="anim-fade-in" style={{ animationDelay: `${i * 30}ms` }}>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       {ACTION_ICONS[a.action_type] ?? <Shield size={14} />}
@@ -109,9 +146,9 @@ export default function ActionsPanel() {
                     )}
                   </td>
                   <td>
-                    {a.executed_by ? (
-                      <span className={`model-pill ${modelClass(a.executed_by)}`}>
-                        {modelLabel(a.executed_by)}
+                    {a.anomaly_model ? (
+                      <span className={`model-pill ${modelClass(a.anomaly_model)}`}>
+                        {modelLabel(a.anomaly_model)}
                       </span>
                     ) : (
                       <span style={{ color: "var(--text-muted)", fontSize: 11 }}>system</span>
